@@ -1,218 +1,116 @@
-// CrabVIP: local collection of played minutes for the Сверхусталость screen.
-// Only reads PEFL reports and the manager's schedule. No POST or external requests.
-(function () {
+/* Local minutes tracker. Only same-origin GETs; no game settings are submitted. */
+(function() {
   'use strict';
-  const KEY_MATCHES = 'matches2', KEY_PLAYERS = 'matchespl2';
-  const STATUS_ID = 'crabSuImportStatus';
-
-  function read(key, fallback) {
-    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
-    catch (err) { console.warn('CrabVIP SU: invalid storage', key, err); return fallback; }
+  const statusId = 'crabSuImportStatus';
+  const ownId = () => Number(localStorage.getItem('myteamid')) || 0;
+  function status(message) { const el=document.getElementById(statusId); if(el) el.textContent=message; }
+  function team() {
+    let roster={}; try { roster=JSON.parse(localStorage.getItem('crabSuRoster')||'{}'); } catch(_) {}
+    return {id:ownId(),roster};
   }
-  function positiveId(v) {
-    const n = Number(v);
-    return Number.isSafeInteger(n) && n > 0 ? n : 0;
+  function backup() {
+    if(localStorage.getItem('crabSuBackupV213')!==null) return;
+    const keys=['matches2','matchespl2','plexl','myteamid','crabSuRoster'];
+    localStorage.setItem('crabSuBackupV213',JSON.stringify(Object.fromEntries(keys.map(k=>[k,localStorage.getItem(k)]))));
   }
-  function badgeId(img) {
-    const src = img && img.getAttribute('src') || '';
-    const m = src.match(/(?:^|\/)club\/(\d+)\.(?:gif|png|webp)/i);
-    return m ? positiveId(m[1]) : 0;
+  function downloadBackup() {
+    const data={format:'CrabVIP-localStorage-v1',origin:location.origin,created:new Date().toISOString(),data:{}};
+    for(let i=0;i<localStorage.length;i++) { const k=localStorage.key(i); data.data[k]=localStorage.getItem(k); }
+    const href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+    const link=document.createElement('a');link.href=href;link.download='CrabVIP-backup-'+new Date().toISOString().slice(0,10)+'.json';
+    link.click();setTimeout(()=>URL.revokeObjectURL(href),30000);
   }
-  function parseReport(doc, href) {
-    const url = new URL(href, location.href);
-    if (url.searchParams.get('p') !== 'refl' || url.searchParams.get('t') !== 'if') return null;
-    const id = positiveId(url.searchParams.get('j'));
-    const ownId = positiveId(localStorage.getItem('myteamid'));
-    const jq = window.jQuery;
-    if (!id || !ownId || !jq) return null;
-    const $main = jq(doc).find('td.back4').first();
-    if (!$main.length) return null;
-    const $head = $main.find('table').eq(3).find('tr:first td');
-    const homeName = $head.eq(0).text().trim(), awayName = $head.eq(2).text().trim();
-    const score = $head.eq(1).text().match(/(\d{1,2})\s*:\s*(\d{1,2})/);
-    if (!score || !homeName || !awayName) return null;
-    const $badges = $main.find('table').eq(4).find('img[src*="club/"]');
-    const homeId = badgeId($badges.get(0)), awayId = badgeId($badges.get($badges.length-1));
-    let side = -1;
-    if (homeId && awayId && homeId !== awayId)
-      side = homeId === ownId ? 0 : (awayId === ownId ? 1 : -1);
-    if (side < 0) {
-      const ownName = localStorage.getItem('crabSuTeamName') || '';
-      if (ownName && ownName === homeName && ownName !== awayName) side = 0;
-      else if (ownName && ownName === awayName && ownName !== homeName) side = 1;
+  function save(doc,href) {
+    const parsed=CrabData.parseReport(doc,href,team());
+    if(!parsed) return false;
+    backup();CrabData.persist(localStorage,parsed);return true;
+  }
+  function linksFrom(doc,base) {
+    const links=new Map();
+    for(const a of doc.querySelectorAll('a[href]')) {
+      try { const u=CrabData.readUrl(a.getAttribute('href'),base);
+        if(u.searchParams.get('t')==='if' && /^\d+$/.test(u.searchParams.get('j')) && u.searchParams.get('z')) links.set(u.searchParams.get('j'),u.href);
+      } catch(_) {}
     }
-    if (side < 0) return null;
-
-    let $cells = $main.find('table').eq(6).find('td[id^="p"]');
-    if ($cells.length < 20) {
-      const $tables = $main.find('table').filter(function () {
-        return jq(this).find('td[id^="p"]').length >= 20;
-      });
-      if ($tables.length !== 1) return null;
-      $cells = $tables.eq(0).find('td[id^="p"]');
-    }
-    // The known PEFL report layout interleaves home/away players.
-    if ($cells.length < 20 || $cells.length % 2) return null;
-    const lastKey = $main.find('p.key').last().text().trim();
-    const lastMinute = parseInt(lastKey, 10);
-    const duration = Number.isFinite(lastMinute) && lastMinute > 105 && lastMinute <= 125 ? 120 : 90;
-    const players = [], seen = new Set();
-    $cells.each(function(index) {
-      if (index % 2 !== side) return;
-      const $cell = jq(this);
-      const number = parseInt($cell.prev('td').text(), 10);
-      if (!Number.isInteger(number) || number < 1 || number > 18) return;
-      const name = ($cell.find('a[href^="javascript"]').first().text() ||
-        $cell.find('a').first().text()).trim().replace(/\s+/g, ' ');
-      if (!name || seen.has(name)) return;
-      const minuteText = $cell.next('td').text();
-      const mark = minuteText.match(/\(\s*(\d{1,3})\s*(?:['’′]|мин\.?)?\s*\)/i);
-      const starter = number <= 11;
-      if (!starter && !mark) return; // Unused substitute.
-      const minute = mark ? (starter ? +mark[1] : duration - +mark[1]) : duration;
-      if (!Number.isFinite(minute) || minute <= 0 || minute > duration) return;
-      const ratingText = $cell.next('td').next('td').text();
-      const rating = ratingText.match(/\d{1,2}[.,]\d{1,2}/);
-      const row = { id, mr: rating ? rating[0].replace(',', '.') : '?', su_minutes: minute };
-      if (minute !== duration) row.m = minute;
-      if (!starter) row['in'] = 1;
-      players.push({ name, row });
-      seen.add(name);
-    });
-    if (players.length < 10 || players.length > 18) return null;
-    const match = {
-      id, m:duration, res:score[1]+':'+score[2],
-      h: url.searchParams.get('z') || undefined
-    };
-    if (homeId) match.hid = homeId;
-    if (awayId) match.aid = awayId;
-    if (side !== 0) match.hnm = homeName;
-    if (side !== 1) match.anm = awayName;
-    return { match, players };
+    return Array.from(links.values());
   }
-
-  function persist(report) {
-    const oldMatches = read(KEY_MATCHES, []);
-    const matches = Array.isArray(oldMatches) ? oldMatches.filter(x => x && positiveId(x.id)) : [];
-    const previous = matches.find(x => +x.id === report.match.id);
-    if (previous) Object.assign(previous, report.match); // Keep saved date/type/SU flag.
-    else matches.push(report.match);
-    const oldPlayers = read(KEY_PLAYERS, {});
-    const players = oldPlayers && typeof oldPlayers === 'object' && !Array.isArray(oldPlayers)
-      ? oldPlayers : {};
-    for (const name of Object.keys(players)) {
-      if (Array.isArray(players[name]))
-        players[name] = players[name].filter(p => p && +p.id !== report.match.id);
-    }
-    for (const person of report.players) {
-      if (!Array.isArray(players[person.name])) players[person.name] = [];
-      players[person.name].push(person.row);
-    }
-    localStorage.setItem(KEY_MATCHES, JSON.stringify(matches));
-    localStorage.setItem(KEY_PLAYERS, JSON.stringify(players));
-    return matches.length;
-  }
-
-  async function getPage(href) {
-    const url = new URL(href, location.href);
-    if (url.origin !== location.origin) throw Error('Другой сайт');
-    const response = await fetch(url.href, { credentials: 'same-origin' });
-    if (!response.ok) throw Error('HTTP ' + response.status);
-    return new DOMParser().parseFromString(await response.text(), 'text/html');
-  }
-  function status(message) {
-    const el = document.getElementById(STATUS_ID);
-    if (el) el.textContent = message;
-  }
-  function scheduleMatches(page) {
-    const result = [], known = new Set();
-    page.querySelectorAll('a[href]').forEach(a => {
-      try {
-        const url = new URL(a.getAttribute('href'), location.href);
-        const id = positiveId(url.searchParams.get('j'));
-        if (url.origin !== location.origin || url.searchParams.get('p') !== 'refl' ||
-            url.searchParams.get('t') !== 'if' || !url.searchParams.get('z') ||
-            !id || known.has(id)) return;
-        known.add(id);
-        result.push(url.href);
-      } catch (_) {}
-    });
-    return result;
-  }
-  async function importSeason(button) {
-    const link = document.querySelector('td.back4 a[href*="t=last"]');
-    if (!link) { status('Не найдена ссылка на расписание'); return; }
-    button.disabled = true;
+  let busy=false;
+  async function importLinks(hrefs) {
+    if(busy) return;
+    const unique=new Map();
     try {
-      status('Чтение расписания...');
-      const page = await getPage(link.href);
-      const links = scheduleMatches(page).slice(0, 50);
-      if (!links.length) { status('В расписании нет ссылок на сыгранные матчи'); return; }
-      let ok=0, failed=0;
-      for (const href of links) {
-        try {
-          const parsed = parseReport(await getPage(href), href);
-          if (parsed) { persist(parsed); ok++; }
-          else failed++;
-        } catch (e) { failed++; console.warn('CrabVIP SU: report unavailable', e); }
-        status('Обработано ' + (ok+failed) + '/' + links.length +
-          '; сохранено: ' + ok + '; не распознано: ' + failed);
-        await new Promise(resolve => setTimeout(resolve, 650));
+      for(const href of hrefs) {
+        const u=CrabData.readUrl(href,location.href);
+        if(u.searchParams.get('t')!=='if' || !/^\d+$/.test(u.searchParams.get('j')) || !u.searchParams.get('z')) throw Error('Нужны полные ссылки на протоколы матчей');
+        unique.set(u.searchParams.get('j'),u.href);
       }
-      status('Сохранено: ' + ok + ', не распознано: ' + failed +
-        '. Обнови страницу, чтобы увидеть таблицу.');
-    } catch (e) {
-      status('Ошибка чтения расписания: ' + e.message);
-    } finally { button.disabled = false; }
+      if(!unique.size) throw Error('Нет ссылок на протоколы. Откройте сыгранный матч: его минуты сохранятся автоматически.');
+      if(unique.size>100) throw Error('За один импорт можно обработать до 100 протоколов');
+      backup();busy=true;
+      let ok=0,failed=0,lastError='';
+      for(const href of unique.values()) {
+        try { if(save(await CrabData.getPage(href,location.href,window),href)) ok++; else { failed++;lastError='Протокол не завершён, чужой клуб или неизвестная разметка'; } }
+        catch(e) { failed++; lastError=e.message; }
+        status('Обработано '+(ok+failed)+'/'+unique.size+'; сохранено: '+ok+'; пропущено: '+failed+(lastError?' — '+lastError:''));
+        if(ok+failed<unique.size) await new Promise(r=>setTimeout(r,700));
+      }
+      if(typeof window.ShowSU==='function') window.ShowSU(true);
+    } catch(e) {status(e.message);} finally {busy=false;}
   }
-
   function setupTeam() {
-    const anchor = document.getElementById('teamsu');
-    if (!anchor) return false;
-    if (document.getElementById(STATUS_ID)) return true;
-    const jq = window.jQuery;
-    const viewedId = jq ? parseInt(jq('td.back4 table:first table td:first').text(), 10) : 0;
-    const ownId = positiveId(localStorage.getItem('myteamid'));
-    if (!ownId || viewedId !== ownId) return true;
-    const name = jq('td.back4 table table table:first td:last').first().text().split(' (')[0].trim();
-    if (name) localStorage.setItem('crabSuTeamName', name);
-    const block = document.createElement('div');
-    block.style.cssText = 'font-size:11px;margin-top:4px;max-width:240px;white-space:normal';
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = 'Собрать СУ из расписания';
-    button.title = 'Читает сохранённые протоколы, ничего не меняет в клубе';
-    const info = document.createElement('div');
-    info.id = STATUS_ID;
-    info.style.marginTop = '4px';
-    const stored = read(KEY_MATCHES, []);
-    info.textContent = 'Матчей в базе: ' + (Array.isArray(stored) ? stored.length : 0) +
-      '. Оценка по загруженным минутам, не официальная СУ.';
-    block.append(button, info);
-    anchor.parentNode.insertBefore(block, anchor.nextSibling);
-    button.addEventListener('click', () => importSeason(button));
+    const anchor=document.getElementById('teamsu');
+    if(!anchor || !ownId() || typeof team_cur==='undefined' || Number(team_cur.tid)!==ownId()) return false;
+    if(document.getElementById(statusId)) return true;
+    const roster={};
+    for(const p of Object.values(players)) if(p && p.id && p.name) roster[p.id]=p.name;
+    try { backup();localStorage.setItem('crabSuRoster',JSON.stringify(roster)); } catch(e) {console.warn('CrabVIP backup:',e.message);}
+    const block=document.createElement('div');block.style.cssText='font-size:11px;max-width:245px;white-space:normal;margin-top:6px';
+    const info=document.createElement('div');info.id=statusId;
+    const add=(label,action)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.addEventListener('click',action);block.append(b);return b;};
+    add('Скачать резервную копию',downloadBackup);
+    add('Из расписания (VIP)',async()=>{
+      if(busy) return;
+      const link=document.querySelector('td.back4 a[href*="t=last"]');
+      if(!link) {status('Не найдена ссылка на расписание');return;}
+      try {status('Чтение расписания…');await importLinks(linksFrom(await CrabData.getPage(link.href,location.href,window),link.href));}
+      catch(e) {status(e.message);}
+    });
+    const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Импорт по ссылкам на протоколы';details.append(summary);
+    const input=document.createElement('textarea');input.rows=4;input.style.width='95%';input.setAttribute('aria-label','Ссылки на протоколы');input.placeholder='По одной ссылке на строку';details.append(input);
+    const b=document.createElement('button');b.type='button';b.textContent='Загрузить протоколы';b.addEventListener('click',()=>importLinks(input.value.split(/\s+/).filter(Boolean)));details.append(b);
+    block.append(details,info);anchor.after(block);
+    try { const data=CrabData.readStore(localStorage,'matches2',[]);status('Матчей в базе: '+Object.values(data).filter(Boolean).length+'. Учёт минут по загруженным протоколам.'); } catch(e) {status(e.message);}
     return true;
   }
-
+  function setupPlayer() {
+    const panel=document.getElementById('m3');
+    if(!panel || !ownId() || document.getElementById('crabSuPlayerImport')) return;
+    const button=document.createElement('button');button.id='crabSuPlayerImport';button.type='button';
+    button.textContent='Собрать минуты клуба из показанных матчей';
+    button.addEventListener('click',()=>importLinks(linksFrom(panel,location.href)));
+    const info=document.createElement('div');info.id=statusId;
+    info.textContent='Откройте вкладку «Матчи», затем запустите сбор. Это список матчей игрока, а не полный сезон клуба.';
+    panel.append(button,info);
+  }
   function start() {
-    const url = new URL(location.href);
-    if (url.searchParams.get('p') !== 'refl') return;
-    if (url.searchParams.get('t') === 'if') {
-      const collect = () => {
-        try { const report = parseReport(document, location.href); if (report) persist(report); }
-        catch(e) { console.warn('CrabVIP SU: parse failed', e); }
+    const u=new URL(location.href);
+    if(u.searchParams.get('p')!=='refl') return;
+    if(u.searchParams.get('t')==='if') {
+      const collect=()=>{
+        if(document.getElementById('crabSuReportResult')) return;
+        let message;
+        try {if(!save(document,location.href))return;message='CrabVIP 2.1.3: минуты матча сохранены. Добавленное время учтено.';}
+        catch(e){message='CrabVIP: '+e.message;}
+        const note=document.createElement('p');note.id='crabSuReportResult';note.textContent=message;
+        const target=document.getElementById('stat1');if(target)target.before(note);
       };
-      collect();
-      setTimeout(collect, 1500);
-    } else if (url.searchParams.get('t') === 'k') {
-      if (!setupTeam()) {
-        const obs = new MutationObserver(() => { if (setupTeam()) obs.disconnect(); });
-        obs.observe(document.documentElement, { subtree:true, childList:true });
-        setTimeout(() => obs.disconnect(), 15000);
-      }
+      collect();setTimeout(collect,1500);
+    } else if(['p','pp'].includes(u.searchParams.get('t'))) {
+      setupPlayer();
+      const observer=new MutationObserver(setupPlayer);observer.observe(document.documentElement,{childList:true,subtree:true});
+    } else if(u.searchParams.get('t')==='k') {
+      if(!setupTeam()) {const observer=new MutationObserver(()=>{if(setupTeam())observer.disconnect();});observer.observe(document.documentElement,{childList:true,subtree:true});setTimeout(()=>observer.disconnect(),15000);}
     }
   }
-  if (document.readyState === 'loading')
-    document.addEventListener('DOMContentLoaded', start, {once:true});
-  else start();
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();

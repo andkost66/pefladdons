@@ -86,7 +86,8 @@ var countSostav = 0;
  *
  * @type {number}
  */
-let countSquadVIP = 0
+let countSquadVIP = 0;
+let countSquadVIPExpected = 0;
 
 var countSk = [0]
 var svalue = true
@@ -128,8 +129,6 @@ $().ready(function() {
 		EditFinance();
 		GetFinish('start', true)
 		if(cid==parseInt(localStorage.myteamid)) {
-			delete localStorage.matches
-			delete localStorage.matchespl
 			getJSONlocalStorage('matches2',matches2)
 			getJSONlocalStorage('matchespl2',matchespl2)
 			getJSONlocalStorage('players2',players3)
@@ -165,7 +164,9 @@ function GetFinish(type, res) {
 		m.modifyteams = true
 
 		ModifyTeams();	//and save if need
-		PrintRightInfo()
+		PrintRightInfo();
+		// For our club, fill the optional values without an extra click.
+		if (team_cur.my) ShowVip();
 	}
 	if(m.savedatapl === undefined && m.get_players==false && m.pg_players){
 		m.savedatapl = true
@@ -262,7 +263,18 @@ function sNomPsum(i, ii) { // Сортировка
     else					return  0
 }
 
+function SuText(value) {
+	return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function SuArg(value) {
+	return 'String.fromCharCode(' + String(value).split('').map(c => c.charCodeAt(0)).join(',') + ')';
+}
+
 function ShowSU(del) {
+	matches2 = []; matchespl2 = {};
+	getJSONlocalStorage('matches2', matches2);
+	getJSONlocalStorage('matchespl2', matchespl2);
+	del = true;
 	Std.debug('ShowSU:del='+del)
 	if (del) {
 		$('table#tblSu, table#tblSuM, div#divSu').remove()
@@ -289,6 +301,7 @@ function ShowSU(del) {
 			plsu[num] = {'name':i, 'minutesu':0,'minute':0,'matches':0,'matches2':0,'del':(plexl.indexOf('|'+i+'|') != -1 ? true : false)}
 			for (j in matchespl2[i]){
 				var mth = matchespl2[i][j]
+				if (!mth) continue;
 				var mch2 = {}
 				for(g in matches2){
 					if(matches2[g]!=null && matches2[g]!=undefined && parseInt(matches2[g].id)==parseInt(j)) {
@@ -300,7 +313,7 @@ function ShowSU(del) {
 				var minute = 0
 				if(mth.mr!=undefined){
 					//минут в матче или свои или полный матч.
-					if (Number.isFinite(Number(mth.su_minutes)) && Number(mth.su_minutes)>0) {
+					if (Number.isFinite(Number(mth.su_minutes)) && mth.su_minutes !== undefined && Number(mth.su_minutes)>=0) {
 						minute = Number(mth.su_minutes)
 					} else if(mth.m==undefined){
 						minute = parseInt(mch2.m)
@@ -309,7 +322,7 @@ function ShowSU(del) {
 					}else{
 						minute = (mth['in']==1 ? parseInt(mth.m)+5+90-parseInt(mch2.m) : parseInt(mth.m)+5)
 					}
-					if (!Number.isFinite(minute) || minute <= 0) continue
+					if (!mch2.id || !Number.isFinite(minute) || minute < 0) continue
 					plsu[num].matches2 	+= 1
 					if(countminutes) {
 						//учитывать ли вообще сыграные минуты для высчета тильд
@@ -327,6 +340,7 @@ function ShowSU(del) {
 		}
 		var teamm = 0
 		for(i in matches2) {
+			if (!matches2[i]) continue;
 			Std.debug('ShowSU:h='+matches2[i].h+':hnm'+matches2[i].hnm+':anm='+matches2[i].anm)
 			if(matches2[i] && matches2[i].h!=undefined && (matches2[i].hnm==undefined || matches2[i].anm==undefined)){
 				teamm += parseInt(matches2[i].m)
@@ -335,8 +349,8 @@ function ShowSU(del) {
 		}
 //		Std.debug('ShowSU:teamm='+teamm)
 		for(i in plsu) {
-			plsu[i].tilda = (plsu[i].del || teamminutes <= 0 ? 'none' : parseFloat(plsu[i].minute/(teamminutes/countSquadMax)*100))
-			plsu[i].tilda2 = (plsu[i].del || teamminutes <= 0 ? 'none' : parseInt(plsu[i].minute-(teamminutes/countSquadMax*40/100)))
+			plsu[i].tilda = (plsu[i].del || teamminutes <= 0 || countSquadMax <= 0 ? 'none' : parseFloat(plsu[i].minute/(teamminutes/countSquadMax)*100))
+			plsu[i].tilda2 = (plsu[i].del || teamminutes <= 0 || countSquadMax <= 0 ? 'none' : parseInt(plsu[i].minute-(teamminutes/countSquadMax*40/100)))
 			//Std.debug('ShowSU:'+i+':'+plsu[i].minute+':'+teamminutes+':'+countSquadMax)
 		}
 
@@ -348,9 +362,9 @@ function ShowSU(del) {
 		preparedhtml += '<th nowrap>~(мин)</th>'
 //		if(deb) preparedhtml += '<th nowrap>%(2)</th>'
 		preparedhtml += '<th>Имя</th>'
-		preparedhtml += '<th>СУ: Минут</th>'
+		preparedhtml += '<th>Учтено минут</th>'
 		preparedhtml += '<th>Матчей</th>'
-		preparedhtml += '<th>Осталось</th>'
+		preparedhtml += '<th>До ориентира*</th>'
 		preparedhtml += '</tr>'
 		var pls = plsu.sort(function(a,b){return (((b.del ? -10000 : 0) + b.minutesu + b.minute*0.001) - ((a.del ? -10000 : 0) + a.minutesu + a.minute*0.001))})
 		var num = 1
@@ -361,12 +375,12 @@ function ShowSU(del) {
 			var ostminute = ost - ostmatch*90
 			var trclass = (plsi.del ? ' bgcolor='+(num%2==1 ? 'BABDB6' : 'D3D7CF') : ' class=back'+(num%2==1 ? 2 : 1))
 			preparedhtml += '<tr'+trclass+'>'
-			preparedhtml += '<td align=center width=1%><a href="javascript:void(DeletePl(\''+plsi.name+'\','+plsi.del+'))"><font color=red>X</font></a></td>'
+			preparedhtml += '<td align=center width=1%><a href="javascript:void(DeletePl('+SuArg(plsi.name)+','+plsi.del+'))"><font color=red>X</font></a></td>'
 			preparedhtml += '<td>'+(parseInt(i)+1)+'</td>'
-			preparedhtml += '<td align=right width=5%'+(plsi.tilda!='none' && plsi.tilda<=40 ? ' bgcolor=yellow' : '')+'><a href="javascript:void(suMarkDel(\''+plsi.name+'\','+plsi.del+'))">'+(plsi.tilda=='none' ? '&nbsp;&nbsp;&nbsp;' : (plsi.tilda).toFixed(1)) +'</a></td>'
-			preparedhtml += '<td align=right width=5%'+(plsi.tilda2!='none' && plsi.tilda2<=0 ? ' bgcolor=yellow' : '')+'><a href="javascript:void(suMarkDel(\''+plsi.name+'\','+plsi.del+'))">'+(plsi.tilda2=='none' ? '&nbsp;&nbsp;&nbsp;' : plsi.tilda2) +'</a></td>'
-//			if(deb) preparedhtml += '<td align=right width=5%'+(plsi.tilda2!='none' && plsi.tilda2<=40 && teamm!=0? ' bgcolor=yellow' : '')+'><a href="javascript:void(suMarkDel(\''+plsi.name+'\','+plsi.del+'))">'+(plsi.tilda2=='none' ? '&nbsp;&nbsp;&nbsp;' : (plsi.tilda2).toFixed(1)) +'</a></td>'
-			preparedhtml += '<td><a href="javascript:void(ShowPlM(\''+plsi.name+'\','+plsi.del+'))"><b>'+plsi.name+'</b></a></td>'
+			preparedhtml += '<td align=right width=5%'+(plsi.tilda!='none' && plsi.tilda<=40 ? ' bgcolor=yellow' : '')+'><a href="javascript:void(suMarkDel('+SuArg(plsi.name)+','+plsi.del+'))">'+(plsi.tilda=='none' ? '&nbsp;&nbsp;&nbsp;' : (plsi.tilda).toFixed(1)) +'</a></td>'
+			preparedhtml += '<td align=right width=5%'+(plsi.tilda2!='none' && plsi.tilda2<=0 ? ' bgcolor=yellow' : '')+'><a href="javascript:void(suMarkDel('+SuArg(plsi.name)+','+plsi.del+'))">'+(plsi.tilda2=='none' ? '&nbsp;&nbsp;&nbsp;' : plsi.tilda2) +'</a></td>'
+//			if(deb) preparedhtml += '<td align=right width=5%'+(plsi.tilda2!='none' && plsi.tilda2<=40 && teamm!=0? ' bgcolor=yellow' : '')+'><a href="javascript:void(suMarkDel('+SuArg(plsi.name)+','+plsi.del+'))">'+(plsi.tilda2=='none' ? '&nbsp;&nbsp;&nbsp;' : (plsi.tilda2).toFixed(1)) +'</a></td>'
+			preparedhtml += '<td><a href="javascript:void(ShowPlM('+SuArg(plsi.name)+','+plsi.del+'))"><b>'+SuText(plsi.name)+'</b></a></td>'
 			preparedhtml += '<td><b>'+plsi.minutesu+'</b>'+(plsi.minute>0 ? '<font size=1> ('+plsi.minute+')</font>' : '')+'</td>'
 			preparedhtml += '<td><b>'+plsi.matches+'</b>'+(plsi.matches2>0 ? '<font size=1> ('+plsi.matches2+')</font>' : '')+'</td>'
 			preparedhtml += '<td><b>'+ost+'</b>'
@@ -377,8 +391,9 @@ function ShowSU(del) {
 		}
 		preparedhtml += '</table>'
 		preparedhtml += '<div id="divSu">'
-		preparedhtml += '<br>1. с однофамильцами могут быть проблемы'
-		preparedhtml += '<br>2. желтым должны быть помечены игроки с тильдами(~)'
+		preparedhtml += '<p><b>Это локальный учёт минут, не официальный показатель сверхусталости.</b> 3600 минут — исторический ориентир CrabVIP, не подтверждённый порог PEFL. Проценты приблизительны и зависят от полноты истории и состава. 40% относится к вкладу в командные тренировки. Товарищеские без потери сыгранности нужно исключать из практики вручную. Новые записи включают добавленное время; старые записи могут содержать оценки.</p>'
+		preparedhtml += '<br>1. проверьте совпадения имён в старой истории'
+		preparedhtml += '<br>2. жёлтым помечена оценка практики ≤40%, а не официальный значок игрока'
 		preparedhtml += '<br>3. серым помечено то что не идет в подсчет % минут'
 		preparedhtml += '<br>4. <a>&ndash;</a> матч ненадо учитывать при подсчете % минут (например при подписывании школьника)'
 		preparedhtml += '<br>5. <font color=red>X</font> удалить: игрока, игрока из матча или матч целиком'
@@ -454,7 +469,7 @@ function ShowPlM(plid,pdel){
 	
 	var prehtml = ''
 	prehtml += '<tr>'
-	prehtml += '<td colspan='+(plid!=0 ? '17 style="border-bottom:1px solid;"' : '7')+'><font size=3><b>'+plname+'</b></font>'+plinfo+'</td>'
+	prehtml += '<td colspan='+(plid!=0 ? '17 style="border-bottom:1px solid;"' : '7')+'><font size=3><b>'+(plid==0 ? '&nbsp;' : SuText(plname))+'</b></font>'+plinfo+'</td>'
 	prehtml += (plid==0 ? '<td colspan=10 style="border-bottom:1px solid;">&nbsp;</td>' : '')
 	prehtml += '</tr>'
 	prehtml += '<tr id=zagolovok height=20>'
@@ -562,8 +577,8 @@ function ShowPlM(plid,pdel){
 
 		prehtml += '<tr'+trcolor+' id="tr'+mch.id+'">'
 		if(plid!=0){
-			prehtml += '<td'+tdcolor+' width=1% style="border-left:1px solid;">'+(minute!='&nbsp;' ? '<a href="javascript:void(MinutesPl('+mch.id+',\''+plid+'\',\'del\'))"><font color=red>X</font></a>' : '&nbsp;')+'</td>'
-			prehtml += '<td'+tdcolor+' width=1%>'+(minute!='&nbsp;' && mchpl.h==undefined && countmatch ? '<a href="javascript:void(MinutesPl('+mch.id+',\''+plid+'\',\'hide\'))">&ndash;</a>' : '&nbsp;')+'</td>'
+			prehtml += '<td'+tdcolor+' width=1% style="border-left:1px solid;">'+(minute!='&nbsp;' ? '<a href="javascript:void(MinutesPl('+mch.id+','+SuArg(plid)+',\'del\'))"><font color=red>X</font></a>' : '&nbsp;')+'</td>'
+			prehtml += '<td'+tdcolor+' width=1%>'+(minute!='&nbsp;' && mchpl.h==undefined && countmatch ? '<a href="javascript:void(MinutesPl('+mch.id+','+SuArg(plid)+',\'hide\'))">&ndash;</a>' : '&nbsp;')+'</td>'
 			prehtml += '<td'+tdcolor+' align=right>'+(minute!='&nbsp;' ? '<b>'+String(num2).fontsize(1)+'</b>' : '&nbsp;')+'</td>'
 			prehtml += '<td'+tdcolor+' nowrap align=right>'+inz+minute+'</td>'
 			prehtml += '<td'+tdcolor+' nowrap>'+pos+'</td>'
@@ -571,14 +586,14 @@ function ShowPlM(plid,pdel){
 			prehtml += '<td'+tdcolor+' nowrap>'+goals+'</td>'
 			prehtml += '<td'+tdcolor+' nowrap style="border-right:1px solid;" align=left width=5%>'+cp+cards+'</td>'
 		}else prehtml += '<td colspan=7 class=back1></td>'
-		prehtml += '<td style="border-left:1px solid;"><a href="javascript:void(SuDelMatch(\''+mch.id+'\',\'del\',\''+plid+'\'))"><font color=red>X</font></a></td>'
+		prehtml += '<td style="border-left:1px solid;"><a href="javascript:void(SuDelMatch(\''+mch.id+'\',\'del\','+SuArg(plid)+'))"><font color=red>X</font></a></td>'
 		prehtml += '<td align=right><b>'+String(num).fontsize(1)+'</b></td>'
 		prehtml += '<td nowrap align=right>'+date.fontsize(1)+'</td>'
-		prehtml += '<th id="tdsu'+mch.id+'">'+(mch.su==undefined ? '<a href="javascript:void(SuDelMatch(\''+mch.id+'\',\'suoff\',\''+plid+'\'))"><img src="system/img/g/tick.gif" height=12></img></a>' : '<a href="javascript:void(SuDelMatch(\''+mch.id+'\',\'suon\',\''+plid+'\'))">&nbsp;&nbsp;&nbsp;</a>')+'</th>'
+		prehtml += '<th id="tdsu'+mch.id+'">'+(mch.su==undefined ? '<a href="javascript:void(SuDelMatch(\''+mch.id+'\',\'suoff\','+SuArg(plid)+'))"><img src="system/img/g/tick.gif" height=12></img></a>' : '<a href="javascript:void(SuDelMatch(\''+mch.id+'\',\'suon\','+SuArg(plid)+'))">&nbsp;&nbsp;&nbsp;</a>')+'</th>'
 //		prehtml += '<td>'+mch.m+'\'</td>'
 		prehtml += '<td valign=center nowrap><img height=15 src="/system/img/w'+(mch.w!=undefined ? mch.w : 0)+'.png"></img>'+(mch.n!=undefined ? '<sup>N</sup>' : '&nbsp;')+'</td>'
 		prehtml += '<td align=right nowrap>'+t1+t1u+'</td>'
-		prehtml += '<td nowrap align=center>'+(mch.h!=undefined ? '<a href="plug.php?p=refl&t=if&j='+mch.id+'&z='+mch.h+'">':'')+mch.res+(mch.h!=undefined?'</a>':'')+(mch.pen!=undefined ? '(п'+mch.pen+')' : '')+'</td>'
+		prehtml += '<td nowrap align=center>'+(mch.h!=undefined ? '<a href="plug.php?p=refl&t=if&j='+mch.id+(mch.report_n?'&n='+mch.report_n:'')+'&z='+mch.h+'">':'')+mch.res+(mch.h!=undefined?'</a>':'')+(mch.pen!=undefined ? '(п'+mch.pen+')' : '')+'</td>'
 		prehtml += '<td nowrap>'+t2+t2u+'</td>'
 		prehtml += '<td nowrap style="border-right:1px solid;">'+type.fontsize(1)+'</td>'
 //		prehtml += '<td nowrap style="border-right:1px solid;">'+(mch.r!=undefined ? mch.r.split(' (')[0] : '&nbsp;')+'</td>'
@@ -673,7 +688,9 @@ function CheckTrash() {
 	Std.debug('Start --> CheckTrash()')
 
 	//count top11
-	var pls = players.sort(sSkills)
+	var pls = Object.values(players).filter(Boolean).sort(sSkills)
+	team_cur.tss = 0;
+	for (const pl of pls) delete pl.trash;
 	var num = 0
 	var ss = 0
 	for(i in pls){
@@ -802,25 +819,24 @@ function Print(dataname){
 	text += '</table>'
 	$('td.back4').prepend(text)
 }
-function getJSONlocalStorage(dataname,data){
-	Std.debug('getJSONlocalStorage:'+dataname)
-	if(String(localStorage[dataname])!='undefined'){
-		var data2 = JSON.parse(localStorage[dataname]);
-		switch(dataname){
-			case 'matchespl2': 
-				for(k in data2){
-					data[k] = []
-					for(l in data2[k]){
-						if(data2[k][l].id!=undefined) data[k][data2[k][l].id]= data2[k][l]
-						else data[k][l]= data2[k][l]
-					}
-				}
-				break
-			default:
-				for(k in data2) data[k] = data2[k]
+function getJSONlocalStorage(dataname, data) {
+	let loaded;
+	try { loaded = CrabData.readStore(localStorage, dataname, dataname === 'matchespl2' ? {} : []); }
+	catch(error) { console.warn(error.message); return false; }
+	if (dataname === 'matchespl2') {
+		for (const [name, rows] of Object.entries(loaded)) {
+			if (!rows || typeof rows !== 'object' || ['__proto__','constructor','prototype'].includes(name)) continue;
+			data[name] = {};
+			for (const [key, row] of Object.entries(rows)) {
+				if (!row || typeof row !== 'object') continue;
+				const id = Number(row.id || key);
+				if (Number.isSafeInteger(id) && id > 0) data[name][id] = Object.assign({},row,{id});
+			}
 		}
-//		for(g in matches2) Std.debug('g='+g+':data='+matches2[g].id)
-	} else return false
+	} else {
+		for(const row of Object.values(loaded)) if(row != null) data.push(row);
+	}
+	return true;
 }
 function saveJSONlocalStorage(dataname,data){
 	Std.debug('saveJSONlocalStorage:'+dataname)
@@ -977,22 +993,8 @@ async function GetData(dataName) {
 	}
 }
 
-function checkDeleteMatches(){
-	Std.debug('checkDeleteMatches()')
-	if (url.j != 99999 || url.j != parseInt(localStorage.myteamid)) return false
-	var checksu = 0
-	for (i in players) checksu += parseInt(players[i].games)
-	Std.debug('checkDeleteMatches:checksu='+checksu)
-	if(checksu==0){
-		Std.debug('checkDeleteMatches:true')
-		matches2.length = 0
-		matchespl2.length = 0
-//		plsu.length = 0
-		ShowSU(true)
-		ShowRoster()
-		delete localStorage.matches2
-		delete localStorage.matchespl2
-	}
+function checkDeleteMatches() {
+	// No automatic history deletion at season boundaries. Old records need explicit review.
 }
 
 function GetInfoPagePl() {
@@ -1048,20 +1050,33 @@ function GetInfoPagePl() {
 
 function Ready(vip = undefined) {
 	if (vip === undefined) {
-		countSostav++
-		if (countSostav === countSquadMax) {
-			GetFinish('pg_players', true);
+		countSostav++;
+		if (countSostav === countSquadMax) GetFinish('pg_players', true);
+		return;
+	}
+	countSquadVIP++;
+	if (countSquadVIP !== countSquadVIPExpected) return;
+	let parsedPlayers = 0;
+	team_cur.twage = 0;
+	team_cur.tvalue = 0;
+	team_cur.tsvalue = 0;
+	for (let i in players) {
+		if (!players[i]._vipLoaded) continue;
+		try {
+			if (GetPl(i)) parsedPlayers++;
+		} catch (error) {
+			Std.debug('Could not parse player ' + i, error);
 		}
+	}
+	if (parsedPlayers === countSquadMax) {
+		$('#showvip').text('(загружено)');
+		GetFinish('pg_playersVip', true);
 	} else {
-		countSquadVIP++;
-		// fulfill all players from squad
-		if (countSquadVIP === countSquadMax) {
-			for (let i in players) {
-				GetPl(i);
-			}
-
-			GetFinish('pg_playersVip', true);
-		}
+		// Partial totals must never be reported as complete squad totals.
+		$('#showvip')
+			.text('(карточки ' + parsedPlayers + '/' + countSquadMax + ', повторить)')
+			.attr('title', Object.values(players).find(p => p && p._cardError)?._cardError || 'Не все карточки игроков удалось распознать')
+			.attr('href', 'javascript:void(ShowVip())');
 	}
 }
 
@@ -1177,21 +1192,25 @@ function ModifyPlayers(vip = undefined) {
  * Get player info from url and load into hidden table
  *
  */
-function GetInfoPagePlVip() {
-	Std.debug('Start --> GetInfoPagePlVip()',players);
-
-	for (let k in players) {		
-		let eUrl = players[k].eurl
-		Std.debug('get url', eUrl);
-		if (eUrl !== undefined) {
-			$('td.back4').append('<table id=pl' + k + ' hidden><tr><td id=pl' + k + '></td></tr></table>');
-			$('td#pl'+ k).load(eUrl + ' center:first', function() {
-				Ready('vip');
-			});
+async function GetInfoPagePlVip() {
+	countSquadVIP = 0;
+	const requests = Object.keys(players).filter(k => players[k] && (players[k].playerUrl || players[k].eurl));
+	countSquadVIPExpected = requests.length;
+	if (!requests.length) { $('#showvip').text('(нет ссылок на карточки)'); return; }
+	let cursor = 0;
+	async function worker() {
+		while (cursor < requests.length) {
+			const k = requests[cursor++];
+			players[k]._vipLoaded = false;
+			try {
+				const doc = await CrabData.getPage(players[k].playerUrl || players[k].eurl, location.href, window);
+				players[k]._card = CrabData.parsePlayer(doc);
+				players[k]._vipLoaded = !!players[k]._card;
+			} catch(error) { players[k]._cardError = error.message; }
+			Ready('vip');
 		}
 	}
-
-	Std.debug('End --> GetInfoPagePlVip');
+	await Promise.all([worker(),worker()]);
 }
 
 /**
@@ -1200,43 +1219,12 @@ function GetInfoPagePlVip() {
  * @param pid player ID
  */
 function GetPl(pid) {
-	// get player skills with number pid
-	var skillsum = 0
-	var skillchange = []
-	$('td#pl' + pid + ' table:first td:even').each(function() {
-		var skillarrow = ''
-		var skillname = $(this).html();
-		var skillvalue = parseInt($(this).next().html().replace('<b>',''));
-		if ($(this).next().find('img').attr('src') != undefined){
-			skillarrow = '.' + $(this).next().find('img').attr('src').split('/')[3].split('.')[0] 		// "system/img/g/a0n.gif"
-		}
-		skillsum += skillvalue;
-		players[pid][skillname] = skillvalue + skillarrow
-
-		if($(this).next().html().indexOf('*') != -1) {
-			skillchange.push(skillname)
-		}
-	})
-	players[pid].sumskills	= skillsum
-	players[pid].sorting	= skillsum
-	players[pid].skchange	= (skillchange[0] != undefined ? skillchange.join(',') : '')
-
-	// get player header info
-	$('td#pl'+pid+' table').remove()
-	var head = $('td#pl'+pid+' b:first').html()
-	players[pid].rent		= (head.indexOf('в аренде из клуба') != -1 ? true : false)
-	players[pid].natfull 	= head.split(' (матчей')[0].split(', ')[1]
-	players[pid].value		= parseInt(head.split('Номинал: ')[1].split(',000$')[0].replace(/,/g,''))*1000
-	players[pid].valuech	= 0
-	players[pid].contract 	= parseInt(head.split('Контракт: ')[1])
-	players[pid].wage 		= parseInt(head.split('г., ')[1].split('$')[0].replace(/,/g,''))
-
-	team_cur.twage	+= players[pid].wage
-	team_cur.tvalue	+= players[pid].value/1000
-	team_cur.tsvalue+= players[pid].svalue/1000
-
-	// Remove hided(autogen) player table
-	$('table#pl' + pid).remove();
+	const card = players[pid]._card;
+	if (!card) return false;
+	Object.assign(players[pid], card);
+	team_cur.twage += card.wage;
+	team_cur.tvalue += card.value / 1000;
+	return true;
 }
 
 /**
@@ -1246,7 +1234,7 @@ function GetPl(pid) {
 function ShowVip() {
 	Std.debug('Start --> ShowVip()');
 
-	$('a#showvip').removeAttr('href');
+	$('a#showvip').removeAttr('href').text('(загрузка...)');
 
 	GetInfoPagePlVip();
 
@@ -1343,7 +1331,7 @@ function ShowPlayersValue() {
 	if (nom) {
 		nom = false
 		var nomtext = ''
-		var pls = players.sort(sValue)
+		var pls = Object.values(players).filter(Boolean).sort(sValue)
 		var sumval = 0
 		var numpl = 0
 		for(let i in pls) {
@@ -1378,7 +1366,7 @@ function ShowPlayersZp() {
 	if (zp) {
 		zp = false
 		var text = ''
-		var pls = players.sort(sZp)
+		var pls = Object.values(players).filter(Boolean).sort(sZp)
 		var sumzp = 0
 		var plsnum = 0
 		for(i in pls) {
@@ -1410,7 +1398,7 @@ function ShowPlayersAge(){
 	if(age) {
 		age = false
 		var text = ''
-		var pls = players.sort(sAge)
+		var pls = Object.values(players).filter(Boolean).sort(sAge)
 		for(i in pls) {
 			var f1 = (pls[i].trash ? '<font color=#888A85>' : '')
 			var f2 = (pls[i].trash ? '</font>' : '')
@@ -1434,7 +1422,7 @@ function ShowPlayersSkillChange(){
 	if(sk) {
 		sk = false
 		var text = ''
-		var pls = players.sort(sSkills)
+		var pls = Object.values(players).filter(Boolean).sort(sSkills)
 		for(i in pls) {
 			var f1 = (pls[i].trash ? '<font color=#888A85>' : '')
 			var f2 = (pls[i].trash ? '</font>' : '')
@@ -1566,21 +1554,11 @@ function ShowChange(value,hide){
  * @return string
  */
 function getAverageStatFromTopPlayersInTeam(field, count = 16) {
-	// if somehow we don't have any players
-	if (players.length === 0) {
-		return '0';
-	}
-
-	let topSumSkills = 0;
-	let playersSortedBySumSkills = players.sort(sSkills);
-
-	for (let i = 0; i < count; i++) {
-		let sumSkills = playersSortedBySumSkills[i][field];
-		// if somehow we don't have 16 players
-		topSumSkills += typeof sumSkills !== undefined ? sumSkills : 0;
-	}
-
-	let averageValue = topSumSkills / count;
-
-	return parseFloat(averageValue.toString()).toFixed(2);
+	const values = Object.values(players)
+		.filter(Boolean)
+		.map(player => Number(player[field]))
+		.filter(value => Number.isFinite(value))
+		.sort((a, b) => b - a);
+	if (values.length < count) return 0;
+	return (values.slice(0, count).reduce((sum, value) => sum + value, 0) / count).toFixed(2);
 }
