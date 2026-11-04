@@ -178,7 +178,9 @@ function RelocateGetNomData(arch) {
                 RelocateGetNomData('&arch=1')
             } else {
                 $('div#debval').find('hr').remove()
-                var data = $('#debval pre').html().split('#').map(function (val, i) {
+                const source = $('#debval pre').html();
+                if (!source) { $('#SValue').text('Нет данных оценки'); return; }
+                var data = source.split('#').map(function (val, i) {
                     return val.split('<br>').map(function (val2, i2) {
                         return $.grep(val2.split('	'), function (num, index) {
                             return !isNaN(index)
@@ -2130,8 +2132,10 @@ function doNewRoster() {
     }
 
     players[0].sale = 0;
-    if ($('table#hd2').parent().find('div:last').text() !== '') {
-        var xinfo = $('table#hd2').parent().find('div:last i').html().split('<br>');
+    // Additional panels (including the minutes importer) may append a plain div.
+    const saleInfo = $('table#hd2').parent().find('div i:last').html() || '';
+    if (saleInfo !== '') {
+        var xinfo = saleInfo.split('<br>');
         for (i in xinfo) {
             if (xinfo[i].indexOf('Выставлен на трансфер') !== -1) {
                 players[0].sale = 1 //parseInt(xinfo[i].split('<b>')[1])

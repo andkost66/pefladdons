@@ -51,6 +51,7 @@ newScriptMenu.onload = function() {
 	});
 	document.dispatchEvent(evt);
 };
+InsertScript('data');
 InsertScript('funcs_db');
 InsertScript('common.user');
 
@@ -72,12 +73,12 @@ switch (location.pathname.substring(1)) {
 	case 'plug.php':
 		switch (UrlValue('p')) {
 			case 'refl':
-				if (t === 'p' || t === 'pp' || t === 'yp') { AddScriptJS(2,'funcs_pls'); }
-				if (t === 'k') { AddScriptJS(4); }
+				if (t === 'p' || t === 'pp' || t === 'yp') { if(AddScriptJS(2,'funcs_pls')) InsertScript('su.user'); }
+				if (t === 'k') { if(AddScriptJS(4)) InsertScript('su.user'); }
 				if (t === 's') { AddScriptJS(5); }
 				if (t === 'last') { AddScriptJS(7); }
 				if (t === 'dov') { AddScriptJS(13); }
-				if (t === 'if') { AddScriptJS(14); }
+				if (t === 'if') { if(AddScriptJS(14)) InsertScript('su.user'); }
 				if (t === 'cup' || t === 'ec' || t === 't' || t === 'f') { AddScriptJS(18); }
 				if (t === 'ref') { AddScriptJS(21); }
 				if (t === 'khist') { AddScriptJS(24); }
@@ -114,6 +115,7 @@ function AddScriptJS(flag,name,name2) {
 		if (name !== undefined) InsertScript(name);
 		if (name2 !== undefined) InsertScript(name2);
 		InsertScript(scriptnames[flag] + '.user');
+		return true;
 	}	
 }
 
@@ -121,6 +123,8 @@ function InsertScript(name) {
 	console.log('crab InsertScript',name);
 	newScriptMenu = document.createElement('script');
 	newScriptMenu.type = 'text/javascript';
+	newScriptMenu.charset = 'utf-8';
+	newScriptMenu.async = false;
 	newScriptMenu.src = chrome.runtime.getURL('js/crab_'+name+'.js');
 	document.getElementsByTagName("head")[0].appendChild(newScriptMenu);
 }
