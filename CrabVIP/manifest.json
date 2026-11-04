@@ -51,6 +51,7 @@
 		"js/crab_player.user.js",
 		"js/crab_contracts.user.js",
 		"js/crab_team.user.js",
+		"js/crab_su.user.js",
 		"js/crab_div.user.js",
 		"js/crab_schedule.user.js",
 		"js/crab_school.user.js",

@@ -73,11 +73,11 @@ switch (location.pathname.substring(1)) {
 		switch (UrlValue('p')) {
 			case 'refl':
 				if (t === 'p' || t === 'pp' || t === 'yp') { AddScriptJS(2,'funcs_pls'); }
-				if (t === 'k') { AddScriptJS(4); }
+				if (t === 'k') { AddScriptJS(4); InsertScript('su.user'); }
 				if (t === 's') { AddScriptJS(5); }
 				if (t === 'last') { AddScriptJS(7); }
 				if (t === 'dov') { AddScriptJS(13); }
-				if (t === 'if') { AddScriptJS(14); }
+				if (t === 'if') { AddScriptJS(14); InsertScript('su.user'); }
 				if (t === 'cup' || t === 'ec' || t === 't' || t === 'f') { AddScriptJS(18); }
 				if (t === 'ref') { AddScriptJS(21); }
 				if (t === 'khist') { AddScriptJS(24); }

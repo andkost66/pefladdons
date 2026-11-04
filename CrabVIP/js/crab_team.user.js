@@ -296,23 +296,26 @@ function ShowSU(del) {
 						break
 					}
 				}
-				var countminutes = (mth.h==undefined && (mch2.hnm==undefined || mch2.anm==undefined) ? true : false)
+				var countminutes = (mch2.id && mth.h==undefined && (mch2.hnm==undefined || mch2.anm==undefined) ? true : false)
 				var minute = 0
 				if(mth.mr!=undefined){
 					//минут в матче или свои или полный матч.
-					if(mth.m==undefined){
+					if (Number.isFinite(Number(mth.su_minutes)) && Number(mth.su_minutes)>0) {
+						minute = Number(mth.su_minutes)
+					} else if(mth.m==undefined){
 						minute = parseInt(mch2.m)
 						if(minute>119) minute=120
 						else if(minute>89) minute=90
 					}else{
 						minute = (mth['in']==1 ? parseInt(mth.m)+5+90-parseInt(mch2.m) : parseInt(mth.m)+5)
 					}
+					if (!Number.isFinite(minute) || minute <= 0) continue
 					plsu[num].matches2 	+= 1
 					if(countminutes) {
 						//учитывать ли вообще сыграные минуты для высчета тильд
 						plsu[num].minute 	+= minute
 					}
-					if(mch2.su==undefined && mth.h!=1){
+					if(mch2.id && mch2.su==undefined && mth.h!=1){
 						// если сверхусталость включена у матча, то добавляем игроку
 						plsu[num].minutesu	+= minute
 						plsu[num].matches 	+= 1
@@ -325,15 +328,15 @@ function ShowSU(del) {
 		var teamm = 0
 		for(i in matches2) {
 			Std.debug('ShowSU:h='+matches2[i].h+':hnm'+matches2[i].hnm+':anm='+matches2[i].anm)
-			if(matches2[i].h!=undefined && (matches2[i].hnm==undefined || matches2[i].anm==undefined)){
+			if(matches2[i] && matches2[i].h!=undefined && (matches2[i].hnm==undefined || matches2[i].anm==undefined)){
 				teamm += parseInt(matches2[i].m)
 				Std.debug('ShowSU:teamm='+teamm)
 			}
 		}
 //		Std.debug('ShowSU:teamm='+teamm)
 		for(i in plsu) {
-			plsu[i].tilda = (plsu[i].del ? 'none' : parseFloat(plsu[i].minute/(teamminutes/countSquadMax)*100))
-			plsu[i].tilda2 = (plsu[i].del ? 'none' : parseInt(plsu[i].minute-(teamminutes/countSquadMax*40/100)))
+			plsu[i].tilda = (plsu[i].del || teamminutes <= 0 ? 'none' : parseFloat(plsu[i].minute/(teamminutes/countSquadMax)*100))
+			plsu[i].tilda2 = (plsu[i].del || teamminutes <= 0 ? 'none' : parseInt(plsu[i].minute-(teamminutes/countSquadMax*40/100)))
 			//Std.debug('ShowSU:'+i+':'+plsu[i].minute+':'+teamminutes+':'+countSquadMax)
 		}
 
@@ -481,8 +484,7 @@ function ShowPlM(plid,pdel){
 
 	var num = 1
 	var num2 = 0
-	var matches22 = []
-	matches22 = matches2
+	var matches22 = matches2.slice()
 	matches22.sort(function(a,b){if(a!=null&&b!=null) return (((a.dt==undefined?(a.hnm!=undefined&&a.anm!=undefined?0:100000000):a.dt) + a.id*0.0000001) - ((b.dt==undefined?(b.hnm!=undefined&&b.anm!=undefined?0:100000000):b.dt) + b.id*0.0000001))})
 	for(j in matches22){
 		prehtml = ''
@@ -490,7 +492,7 @@ function ShowPlM(plid,pdel){
 		if(mch!=null && mch!=undefined && mch.res!=undefined){
 
 		var mchpl	= (matchespl2[plid]!=undefined && matchespl2[plid][mch.id]!=undefined ? matchespl2[plid][mch.id] : false)
-		if(mchpl.mr==undefined && mch.hnm!=undefined && mch.anm!=undefined){
+		if((!mchpl || mchpl.mr==undefined) && mch.hnm!=undefined && mch.anm!=undefined){
 
 		}else{
 		var t1 	= (mch.hnm==undefined ? '<b>'+team_cur.tname+'</b>' : mch.hnm)
@@ -527,7 +529,7 @@ function ShowPlM(plid,pdel){
 		var inz		= '&nbsp;'
 		var pos		= ''
 		if(plid!=0 && mchpl && mchpl.mr!=undefined){
-			minute	= (mchpl.m==undefined ? mch.m : mchpl.m)
+			minute	= (mchpl.su_minutes!=undefined ? mchpl.su_minutes : (mchpl.m==undefined ? mch.m : mchpl.m))
 			mark	= (mchpl.mr!=undefined ? mchpl.mr : '&nbsp;')
 			im		= (mchpl.im!=undefined ? true : false)
 			cp		= (mchpl.cp!=undefined ? 'кэп&nbsp;' : '')
@@ -556,7 +558,7 @@ function ShowPlM(plid,pdel){
 		if(!countmatch) trcolor = ' bgcolor='+(num%2==1 ? 'BABDB6' : 'D3D7CF')
 		else trcolor = ' class=back'+(num%2==1 ? 2 : 1)
 		var tdcolor = ''
-		if(pdel || mchpl.h!=undefined) tdcolor = ' bgcolor='+(num%2==1 ? 'BABDB6' : 'D3D7CF')
+		if(pdel || (mchpl && mchpl.h!=undefined)) tdcolor = ' bgcolor='+(num%2==1 ? 'BABDB6' : 'D3D7CF')
 
 		prehtml += '<tr'+trcolor+' id="tr'+mch.id+'">'
 		if(plid!=0){
