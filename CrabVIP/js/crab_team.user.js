@@ -1603,17 +1603,3 @@ function getAverageStatFromTopPlayersInTeam(field, count = 16) {
 	if (values.length < count) return 0;
 	return (values.slice(0, count).reduce((sum, value) => sum + value, 0) / count).toFixed(2);
 }
-
-	let topSumSkills = 0;
-	let playersSortedBySumSkills = players.sort(sSkills);
-
-	for (let i = 0; i < count; i++) {
-		let sumSkills = playersSortedBySumSkills[i][field];
-		// if somehow we don't have 16 players
-		topSumSkills += typeof sumSkills !== undefined ? sumSkills : 0;
-	}
-
-	let averageValue = topSumSkills / count;
-
-	return parseFloat(averageValue.toString()).toFixed(2);
-}
