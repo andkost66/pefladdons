@@ -86,7 +86,8 @@ var countSostav = 0;
  *
  * @type {number}
  */
-let countSquadVIP = 0
+let countSquadVIP = 0;
+let countSquadVIPExpected = 0;
 
 var countSk = [0]
 var svalue = true
@@ -165,7 +166,9 @@ function GetFinish(type, res) {
 		m.modifyteams = true
 
 		ModifyTeams();	//and save if need
-		PrintRightInfo()
+		PrintRightInfo();
+		// For our club, fill the optional values without an extra click.
+		if (team_cur.my) ShowVip();
 	}
 	if(m.savedatapl === undefined && m.get_players==false && m.pg_players){
 		m.savedatapl = true
@@ -1046,20 +1049,33 @@ function GetInfoPagePl() {
 
 function Ready(vip = undefined) {
 	if (vip === undefined) {
-		countSostav++
-		if (countSostav === countSquadMax) {
-			GetFinish('pg_players', true);
+		countSostav++;
+		if (countSostav === countSquadMax) GetFinish('pg_players', true);
+		return;
+	}
+	countSquadVIP++;
+	if (countSquadVIP !== countSquadVIPExpected) return;
+	let parsedPlayers = 0;
+	team_cur.twage = 0;
+	team_cur.tvalue = 0;
+	team_cur.tsvalue = 0;
+	for (let i in players) {
+		if (!players[i]._vipLoaded) continue;
+		try {
+			if (GetPl(i)) parsedPlayers++;
+		} catch (error) {
+			Std.debug('Could not parse player ' + i, error);
 		}
+	}
+	if (parsedPlayers === countSquadMax) {
+		$('#showvip').text('(загружено)');
+		GetFinish('pg_playersVip', true);
 	} else {
-		countSquadVIP++;
-		// fulfill all players from squad
-		if (countSquadVIP === countSquadMax) {
-			for (let i in players) {
-				GetPl(i);
-			}
-
-			GetFinish('pg_playersVip', true);
-		}
+		// Partial totals must never be reported as complete squad totals.
+		$('#showvip')
+			.text('(карточки ' + parsedPlayers + '/' + countSquadMax + ', повторить)')
+			.attr('title', 'Не все карточки игроков удалось загрузить')
+			.attr('href', 'javascript:void(ShowVip())');
 	}
 }
 
@@ -1176,19 +1192,30 @@ function ModifyPlayers(vip = undefined) {
  *
  */
 function GetInfoPagePlVip() {
-	Std.debug('Start --> GetInfoPagePlVip()',players);
-
-	for (let k in players) {		
-		let eUrl = players[k].eurl
-		Std.debug('get url', eUrl);
-		if (eUrl !== undefined) {
-			$('td.back4').append('<table id=pl' + k + ' hidden><tr><td id=pl' + k + '></td></tr></table>');
-			$('td#pl'+ k).load(eUrl + ' center:first', function() {
-				Ready('vip');
-			});
-		}
+	Std.debug('Start --> GetInfoPagePlVip()', players);
+	countSquadVIP = 0;
+	const requests = [];
+	for (let k in players) {
+		players[k]._vipLoaded = false;
+		// Current PEFL markup may omit the legacy trp link.
+		const playerUrl = players[k].eurl || players[k].playerUrl;
+		if (playerUrl) requests.push({ id: k, url: playerUrl });
 	}
-
+	countSquadVIPExpected = requests.length;
+	if (!countSquadVIPExpected) {
+		$('#showvip').text('(нет ссылок на карточки)')
+			.attr('href', 'javascript:void(ShowVip())');
+		return;
+	}
+	for (const request of requests) {
+		const k = request.id;
+		$('table#pl' + k).remove();
+		$('td.back4').append('<table id=pl' + k + ' hidden><tr><td id=pl' + k + '></td></tr></table>');
+		$('td#pl' + k).load(request.url + ' center:first', function(responseText, status) {
+			players[k]._vipLoaded = status === 'success';
+			Ready('vip');
+		});
+	}
 	Std.debug('End --> GetInfoPagePlVip');
 }
 
@@ -1222,6 +1249,10 @@ function GetPl(pid) {
 	// get player header info
 	$('td#pl'+pid+' table').remove()
 	var head = $('td#pl'+pid+' b:first').html()
+	if (typeof head !== 'string' || !head.includes('Номинал: ') ||
+		!head.includes('Контракт: ') || !head.includes('г., ')) {
+		return false;
+	}
 	players[pid].rent		= (head.indexOf('в аренде из клуба') != -1 ? true : false)
 	players[pid].natfull 	= head.split(' (матчей')[0].split(', ')[1]
 	players[pid].value		= parseInt(head.split('Номинал: ')[1].split(',000$')[0].replace(/,/g,''))*1000
@@ -1231,10 +1262,11 @@ function GetPl(pid) {
 
 	team_cur.twage	+= players[pid].wage
 	team_cur.tvalue	+= players[pid].value/1000
-	team_cur.tsvalue+= players[pid].svalue/1000
+	team_cur.tsvalue+= Number.isFinite(players[pid].svalue) ? players[pid].svalue/1000 : 0
 
 	// Remove hided(autogen) player table
 	$('table#pl' + pid).remove();
+	return true;
 }
 
 /**
@@ -1244,7 +1276,7 @@ function GetPl(pid) {
 function ShowVip() {
 	Std.debug('Start --> ShowVip()');
 
-	$('a#showvip').removeAttr('href');
+	$('a#showvip').removeAttr('href').text('(загрузка...)');
 
 	GetInfoPagePlVip();
 
@@ -1564,10 +1596,13 @@ function ShowChange(value,hide){
  * @return string
  */
 function getAverageStatFromTopPlayersInTeam(field, count = 16) {
-	// if somehow we don't have any players
-	if (players.length === 0) {
-		return '0';
-	}
+	const values = Object.values(players)
+		.map(player => Number(player[field]))
+		.filter(value => Number.isFinite(value))
+		.sort((a, b) => b - a);
+	if (values.length < count) return 0;
+	return (values.slice(0, count).reduce((sum, value) => sum + value, 0) / count).toFixed(2);
+}
 
 	let topSumSkills = 0;
 	let playersSortedBySumSkills = players.sort(sSkills);
